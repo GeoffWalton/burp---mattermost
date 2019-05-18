@@ -138,6 +138,7 @@ end
 require 'json'
 require 'time'
 class MatterMostClient
+ CODE_BLOCK_MAX_LEN = 2500 #Split size for code posts
  attr_reader :server
  attr_accessor :login_id
  attr_accessor :password
@@ -148,7 +149,13 @@ class MatterMostClient
    setuphttp
    @helpers = burpCallbacks.getHelpers
    @callbacks = burpCallbacks
+   @server = ''
+   @login_id = ''
 
+   t =  @callbacks.loadExtensionSetting('MM_server')
+   self.server = t if t
+   t = @callbacks.loadExtensionSetting('MM_login_id')
+   @login_id = t if t
 
    @teams = Hash.new
    @channels = Hash.new
@@ -189,6 +196,8 @@ class MatterMostClient
    @user_id = rsp['id']
    get_teams #Do this once on login
    get_channels #get some initial info
+   @callbacks.saveExtensionSetting('MM_login_id', @login_id) #save the user on a successful login
+   @callbacks.saveExtensionSetting('MM_server', @server) #save the server on a successful login
    true
  rescue => e
    @lasterror = e.message
@@ -216,11 +225,11 @@ class MatterMostClient
   end
 
  def post_burp_response(channel, obj)
-   post_as_code channel, bytesToString(obj.getResponse)
+   bytesToString(obj.getResponse).to_s.scan(/.{1,#{CODE_BLOCK_MAX_LEN}}/m) {|str| post_as_code(channel, str)}
  end
 
  def post_burp_request(channel, obj)
-   post_as_code channel, bytesToString(obj.getRequest)
+   bytesToString(obj.getRequest).to_s.scan(/.{1,#{CODE_BLOCK_MAX_LEN}}/m) {|str| post_as_code(channel, str)}
  end
 
  def post_as_code(channel, text)
@@ -342,9 +351,9 @@ class MatterMostUI < AbtractBrupExtensionUI
 
   def buildUI
     BLabel.new self, 2,2,100,14,'Server:'
-    @txt_server = BTextField.new self,100,2,250,14, ''
+    @txt_server = BTextField.new self,100,2,250,14, client.server
     BLabel.new self, 2,25, 100, 14, 'Login:'
-    @txt_login_id = BTextField.new self,100,25,250,14, ''
+    @txt_login_id = BTextField.new self,100,25,250,14, client.login_id
     BLabel.new self, 2,50, 100, 14, 'Password:'
     @txt_password = BPasswordField.new self,100,50,250,14, ''
     BLabel.new self, 2,75, 100, 14, 'MFA Token:'
@@ -442,7 +451,6 @@ end
 
     def registerExtenderCallbacks(callbacks)
       callbacks.setExtensionName ExtensionName
-      #callbacks.addSuiteTab @extensionInterface
       client = MatterMostClient.new callbacks
       ui = MatterMostUI.new(client)
       menu_factory = MatterMostContextMenuFactory.new(client)
